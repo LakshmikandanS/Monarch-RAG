@@ -6,7 +6,13 @@ def header_aware_chunk_documents(documents):
     chunks=[]
     for i, doc in enumerate(documents):
         sections = re.split(r'\n(?=#)', doc["content"])
-        file_name=doc["metadata"]["file_name"]
+        metadata = doc.get("metadata", {})
+        file_name = (
+            metadata.get("file_name")
+            or metadata.get("name")
+            or metadata.get("title")
+            or "document"
+        )
         header_info=get_sections_with_hierarchy(doc["content"])
         header_starts=[h["start_char"] for h in header_info]
         current_char_pos = 0

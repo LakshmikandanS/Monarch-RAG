@@ -1,0 +1,125 @@
+Architecture & Evolution Report: Multi-Agent RAG Pipeline
+
+Date: June 28, 2026
+Core Hardware Constraint: Local Execution, NVIDIA RTX 5060 (5.2GB VRAM)
+Embedding Model: BAAI/bge-base-en-v1.5
+
+1. Executive Summary
+
+This project aims to build a highly optimized, local Retrieval-Augmented Generation (RAG) engine capable of indexing entire books and technical documentation (e.g., PyTorch tutorials). The system serves as the foundational memory layer for a future Multi-Agent architecture. Due to strict VRAM limits, standard redundant indexing techniques were discarded in favor of a Parent-Child (Small-to-Big) Retrieval Architecture, ensuring maximum LLM context quality with minimal GPU overhead.
+
+2. Phase 1: Chunking Strategies & The AST Breakthrough
+
+Initially, we experimented with four distinct chunking methodologies. The goal was to solve the tension between narrative text and technical syntax (code blocks).
+
+The Four Strategies Tested:
+
+Recursive (Control): Standard LangChain \n\n splitting. Proved too random and often severed code logic.
+
+Header-Aware: Split by Markdown headers (#). Excellent for narrative context but too large/diluted for precise vector searches.
+
+Code-Aware Sliding Window: A sliding window that respects code boundaries.
+
+Semantic: Splitting based on cosine distance shifts between adjacent text blocks.
+
+Critical Bugs & Solutions in Chunking:
+
+BUG 1: The "Dot Murderer" (Semantic Regex Failure)
+
+Issue: The initial semantic chunker used standard regex to split on periods (.). This shredded Python syntax (e.g., nn.Linear().to(device) became three separate fragments). The embedding model hallucinates when fed shattered syntax, resulting in a 0% retrieval win rate.
+
+Fix: Developed AST-Anchored Atomized Semantic Chunking. We abandoned regex and built a parser that isolates intact code blocks (python ... ) and paragraphs into "Atoms". We introduced Syntax Gravity, hardcoding the semantic distance between prose and its immediately following code block to 0.0. This permanently welded explanations to their corresponding code.
+
+BUG 2: Fastembed Generator Crash
+
+Issue: np.linalg.norm threw a ufunc error when attempting to normalize semantic vectors.
+
+Fix: The fastembed library returns a lazy generator, not a list. Wrapped the embed call in list(model.embed(...)) before casting to np.array.
+
+BUG 3: Overlap Poisoning & .find() Misalignment
+
+Issue: The sliding window used string .find() to map text back to its parent header. Common strings (like print()) snapped to the wrong headers. Furthermore, the overlap window occasionally swallowed half of a ```` tag, poisoning the Abstract Syntax Tree (AST) state of subsequent chunks.
+
+Fix: Implemented Absolute Character Tracking (bisect_right) to mathematically guarantee chunk-to-header mapping. Added an AST Shield that drops overlap text if it contains an uneven number of backticks.
+
+3. Phase 2: Evaluation & Reciprocal Rank Fusion (RRF)
+
+To evaluate the chunkers objectively, we built the benchmark_chunking_strategies "Battle Arena" and tested 8 hardcore PyTorch queries.
+
+Finding: Header-Aware won narrative queries; Code/Semantic won exact-syntax queries.
+
+The RRF Era: We built a Reciprocal Rank Fusion (execute_rrf_fusion) engine to combine the scores of Header-Aware and Sliding-Window chunks based on a shared "Universal Anchor" (Filename::Header).
+
+The Keyword Weakness: The system failed on Query 6 ("bootcamp prerequisite") because Dense Embedding models (like BGE) struggle with exact-keyword matching, preferring conceptual "vibes". (Note: Future implementation of BM25/Sparse retrieval is required for exact keyword lookups).
+
+4. Phase 3: The Production Architecture (Parent-Child)
+
+While RRF was highly accurate, it required embedding and storing the library multiple times (Hoarding), which violates the RTX 5060 VRAM constraint for large-scale book indexing.
+
+We pivoted to Parent-Child Retrieval (Small-to-Big), which is the current normalized production standard for the pipeline.
+
+How Parent-Child Works:
+
+The Parent (Storage/Reader):
+
+Generated using the Header-Aware chunker.
+
+Provides massive, human-readable narrative context.
+
+Stored as an O(1) Dictionary on Disk (JSON). Costs 0 VRAM.
+
+The Child (Search/Retriever):
+
+Generated using the Code-Aware Sliding or Upgraded Semantic chunker.
+
+Provides dense, highly specific vectors for pinpoint accuracy.
+
+Stored in the GPU Vector Database.
+
+Contains a metadata pointer (anchor) to its specific Parent.
+
+Execution Flow:
+
+Query -> Embed -> np.dot against Child Matrix -> Get Top Child -> Read Child's anchor -> Retrieve Full Parent Text -> Pass to LLM.
+
+This decouples search granularity from reading comprehension, maximizing both while drastically reducing GPU memory footprints.
+
+5. System Infrastructure & DevOps
+
+To eliminate Jupyter Notebook bottlenecks (restarting kernels and waiting for web scraping), the project was heavily decoupled:
+
+Vault Storage Manager (vector_storage.py):
+
+Saves metadata to chunks.json and vectors to matrix.npy.
+
+Loading from SSD takes ~0.1 seconds, preventing the need to wake up the GPU/Embedder during testing and LLM agent development.
+
+Hot-Reloading:
+
+Utilized %load_ext autoreload to allow live editing of retrieval/chunking scripts without restarting the Jupyter kernel.
+
+CUDA GPU Acceleration & Hardware Unlocking:
+
+The Problem: By default, embedding pipelines often default to the CPU on Windows, creating massive bottlenecks.
+
+The Solution: We bypassed the OS limitations to explicitly unlock the NVIDIA RTX 5060. By configuring our embedding engine (via fastembed / ONNX runtime) to target the CUDAExecutionProvider, we shifted the intensive workload off the CPU. The batch vectorization of chunks and the massive np.dot() matrix multiplications now happen directly inside the 5.2GB of VRAM, taking operations that would normally take minutes down to fractions of a second.
+
+Modular Directory Structure:
+
+/embeddings - Model loading and text-to-vector transformation (CUDA configs).
+
+/chunking - AST, Semantic, and Header parsers.
+
+/retrieval - Parent-Child logic and search orchestration.
+
+/database - I/O operations for vectors and JSON.
+
+/evaluation - The Battle Arena and benchmarking suites.
+
+6. Future Roadmap
+
+LLM Generation Layer: Integrate openai (or groq) python client to consume the retrieved Parent payloads and generate answers.
+
+Sparse Retrieval (BM25): Add a lightweight BM25 keyword index to catch the "needle in the haystack" queries that dense vectors miss.
+
+Multi-Agent Orchestration: Wrap the retrieve_context_for_agent function into an API tool that a LangGraph or AutoGen agent can call natively.

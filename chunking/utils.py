@@ -1,23 +1,25 @@
 import re
+from typing import Dict, List
 
-def get_sections_with_hierarchy(content):
-    # 1. Clean the content of windows style carriage returns just in case
+def get_sections_with_hierarchy(content: str) -> List[Dict]:
+    """
+    Extracts Markdown headers and builds a hierarchical path (e.g., 'Chapter 1 > Training Loop').
+    """
+    # Clean Windows-style carriage returns
     cleaned_content = content.replace('\r\n', '\n')
     
-    # 2. Resilient pattern: Looks for 1 to 6 '#' signs at the start of any line
-    # followed by at least one space or tab, capturing the text until the end of that line.
+    # Resilient pattern: Looks for 1 to 6 '#' signs at the start of any line
     header_pattern = re.compile(r'^(#{1,6})[ \t]+(.*)$', re.MULTILINE)
     
     sections = []
     hierarchy_stack = []
 
     for match in header_pattern.finditer(cleaned_content):
-        # match.group(1) is the actual hashtags string (e.g. "##")
         level = len(match.group(1))        
         header_text = match.group(2).strip() 
         start_char = match.start()
         
-        # Maintain the stack hierarchy
+        # Maintain the stack hierarchy (pop headers of equal or lower importance)
         while hierarchy_stack and hierarchy_stack[-1][0] >= level:
             hierarchy_stack.pop()
             
@@ -26,7 +28,9 @@ def get_sections_with_hierarchy(content):
         
         sections.append({
             "start_char": start_char,
-            "section_path": hierarchy_path
+            "section_path": hierarchy_path,
+            "level": level,
+            "header": header_text
         })
         
     return sections

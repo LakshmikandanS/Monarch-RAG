@@ -3,7 +3,13 @@ import bisect
 
 def sliding_chunk_document(documents,n=0, chunk_size=512, overlap=128):
     chunks=[]
-    file_name=documents[n]["metadata"]["file_name"]
+    metadata = documents[n].get("metadata", {})
+    file_name = (
+        metadata.get("file_name")
+        or metadata.get("name")
+        or metadata.get("title")
+        or "document"
+    )
     step=chunk_size-overlap
     header_info=get_sections_with_hierarchy(documents[n]["content"])
     header_starts=[h["start_char"] for h in header_info]

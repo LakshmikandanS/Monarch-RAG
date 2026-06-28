@@ -4,7 +4,13 @@ import bisect
 def fixed_chunk_document(documents,n=0, chunk_size=512):
     chunks=[]
     content=documents[n]["content"]
-    file_name=documents[n]["metadata"]["file_name"]
+    metadata = documents[n].get("metadata", {})
+    file_name = (
+        metadata.get("file_name")
+        or metadata.get("name")
+        or metadata.get("title")
+        or "document"
+    )
     header_info=get_sections_with_hierarchy(content)
     header_starts=[h["start_char"] for h in header_info]
     for i in range(0, len(content), chunk_size):
