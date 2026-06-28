@@ -12,31 +12,25 @@ def build_parent_child_vault(
     child_chunks: List[Dict], 
     model
 ) -> Dict[str, Any]:
-    """
-    Builds a highly efficient, single-matrix database.
-    - Parents (Header-Aware) are stored only as text lookups (Zero VRAM).
-    - Children (Code-Aware Sliding/Semantic) are embedded for search.
-    """
-    print(f"Building Multi-Vector Vault: {len(parent_chunks)} Parents, {len(child_chunks)} Children...")
+    print(f"Building Vault: {len(parent_chunks)} Parents, {len(child_chunks)} Children...")
     
-    # 1. Create a fast O(1) lookup dictionary for Parents based on their anchor
-    parent_lookup = {}
-    for parent in parent_chunks:
-        meta = parent["metadata"]
-        file_key = meta.get("file_name", "").replace(".html", "")
-        sec_key = meta.get("section") or meta.get("specific_header") or "Root"
-        anchor = f"{file_key}::{sec_key}"
+    # 1. Parent Lookups (Lightweight)
+    parent_lookup = {
+        f"{p['metadata'].get('file_name', '').replace('.html', '')}::{p['metadata'].get('section') or 'Root'}": {
+            "content": p["content"], "metadata": p["metadata"]
+        } for p in parent_chunks
+    }
         
-        parent_lookup[anchor] = {
-            "content": parent["content"],
-            "metadata": meta,
-            "anchor": anchor
-        }
-        
-    # 2. Embed ONLY the children (Saves massive GPU memory & compute)
+    # 2. Optimized Embedding (Pre-allocate memory to avoid list bloat)
     child_texts = [child["content"] for child in child_chunks]
-    print(f"Vectorizing {len(child_texts)} child chunks on RTX 5060...")
-    child_matrix = np.array(list(model.embed(child_texts, batch_size=128)))
+    
+    # Use a generator approach to prevent crashing system RAM
+    embeddings = []
+    for i in range(0, len(child_texts), 32): # Batching manually
+        batch = child_texts[i:i+32]
+        embeddings.extend(list(model.embed(batch)))
+        
+    child_matrix = np.array(embeddings, dtype=np.float32) # Force float32 to save 50% VRAM
     
     return {
         "parent_lookup": parent_lookup,

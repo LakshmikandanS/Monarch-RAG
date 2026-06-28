@@ -134,10 +134,10 @@ def execute_rrf_fusion(
     return final_results
 
 
-def run_stress_test_suite(model, vault: Dict[str, Any]):
+def run_stress_test_suite(model, vault: Dict[str, Any],test_queries: List[str]):
     """
     Runs the 8 hardcore PyTorch queries to benchmark all indexing strategies blindly.
-    """
+    
     test_queries = [
         "What is the exact code to manually set the random seed for CPU and CUDA?",
         "Show me the code to check which device a model's parameters are sitting on.",
@@ -148,7 +148,7 @@ def run_stress_test_suite(model, vault: Dict[str, Any]):
         "What is the overarching computer vision project built throughout the milestone chapters called?",
         "What is the difference between torch.rand and torch.randn?"
     ]
-
+    """
     win_counts = {strat: 0 for strat in vault.keys()}
 
     print("\n🚀 INITIATING BLIND STRESS TEST SUITE...")
