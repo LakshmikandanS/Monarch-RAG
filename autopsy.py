@@ -1,46 +1,67 @@
-import os
-import site
+"""Diagnostic: try binding the cached embedding ONNX file directly to CUDA."""
 
-# --- THE SYSTEM ERROR 126 SILENCER ---
-# This forces Windows to read the pip-installed NVIDIA DLLs into memory 
-# before the ONNX C++ engine attempts to initialize.
-for site_pkg in site.getsitepackages():
-    for nvidia_submod in ["cublas", "cudnn", "cuda_runtime"]:
-        dll_dir = os.path.join(site_pkg, "nvidia", nvidia_submod, "bin")
-        if os.path.exists(dll_dir):
-            os.add_dll_directory(dll_dir)
-# -------------------------------------
+from __future__ import annotations
 
+import sys
 from pathlib import Path
+
 import onnxruntime as ort
-from fastembed import TextEmbedding
 
-print("1. Locating your cached BGE-Base model weights...")
-embedder = TextEmbedding("BAAI/bge-base-en-v1.5")
-model_dir = embedder.model._model_dir
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-onnx_files = list(Path(model_dir).rglob("*.onnx"))
-if not onnx_files:
-    print("❌ Critical: Could not find the .onnx file on your disk.")
-    exit()
+from monarch.embeddings import get_model, load_model  # noqa: E402
+from monarch.embeddings.cuda import enable_cuda_runtime  # noqa: E402
 
-target_onnx = str(onnx_files[0])
-print(f"   Found: {Path(target_onnx).name}")
 
-print("\n2. Attempting bare-metal CUDA binding (Zero safety net)...")
-try:
-    # Notice the list: ONLY CUDA. If a single DLL is unreadable, 
-    # C++ will refuse to catch the exception and scream the exact file at us.
-    session = ort.InferenceSession(target_onnx, providers=["CUDAExecutionProvider"])
-    
-    print("\n" + "="*60)
-    print("🎉 HOLY SHIT, IT ACCEPTED IT.")
-    print(f"Engines officially locked to session: {session.get_providers()}")
-    print("="*60)
+def _model_dir(embedder) -> Path | None:
+    inner = getattr(embedder, "model", None)
+    model_dir = getattr(inner, "_model_dir", None)
+    if model_dir is not None:
+        return Path(model_dir)
+    nested = getattr(inner, "model", None) or getattr(inner, "_model", None)
+    model_dir = getattr(nested, "_model_dir", None)
+    return Path(model_dir) if model_dir is not None else None
 
-except Exception as e:
-    print("\n" + "!"*60)
-    print("💀 THE EXACT C++ CRASH REASON WE'VE BEEN LOOKING FOR:")
-    print("!"*60)
-    print(e)
-    print("!"*60)
+
+def main() -> None:
+    print("1. Enabling CUDA runtime directories...")
+    enable_cuda_runtime(verbose=True)
+
+    print("\n2. Loading shared Monarch embedding model...")
+    load_model()
+    embedder = get_model()
+    model_dir = _model_dir(embedder)
+
+    if model_dir is None:
+        print("Could not locate the cached model directory from FastEmbed internals.")
+        sys.exit(1)
+
+    onnx_files = list(model_dir.rglob("*.onnx"))
+    if not onnx_files:
+        print("Could not find an ONNX file under the cached model directory.")
+        sys.exit(1)
+
+    target_onnx = str(onnx_files[0])
+    print(f"   Found: {Path(target_onnx).name}")
+
+    print("\n3. Attempting direct CUDA binding...")
+    try:
+        session = ort.InferenceSession(
+            target_onnx,
+            providers=["CUDAExecutionProvider"],
+        )
+        print("\n" + "=" * 60)
+        print(f"Session providers: {session.get_providers()}")
+        print("=" * 60)
+    except Exception as exc:
+        print("\n" + "!" * 60)
+        print("Direct CUDA binding failed:")
+        print("!" * 60)
+        print(exc)
+        print("!" * 60)
+
+
+if __name__ == "__main__":
+    main()

@@ -155,24 +155,3 @@ def _package(text, fname, h_info, h_starts, start_pos, c_idx):
             "words": len(clean.split()), "lines": len(clean.splitlines())
         }
     }
-'''
-
-***
-
-### Why this specific algorithm will drag Semantic out of the grave:
-
-1. **The Atomizer (`_atomize_markdown`):** Line 88 reads your document. When it sees ```` ```python ````, it locks the door and refuses to let the tokenizer sever a single line until it hits the closing ```` ``` ````. Your PyTorch code blocks remain 100% mathematically pristine.
-2. **Syntax Gravity (Line 44):** Look at this exact logic block:
-   ```python
-   if atoms[i+1]["is_code"]:
-       distances.append(0.0)
-   ```
-   If Atom 4 is the prose *"To calculate the loss, run:"*, and Atom 5 is `loss = loss_fn(y_pred, y)`, standard cosine math would say the distance is `0.61` (Trigger split). **Syntax Gravity catches it, forces the distance to `0.0`, and permanently welds the code block to the sentence that introduced it.**
-3. **Adaptive Thresholding (Line 53):** Instead of an arbitrary `95th percentile`, it calculates $\mu + 1.1\sigma$. If a tutorial chapter is written smoothly, the standard deviation is tiny, and it lets the chunk flow for 800 characters. If the chapter jumps wildly between 5 different topics, $\sigma$ expands, and it severs the chunks aggressively.
-
-#### Put it in the Battle Arena:
-
-Take your `scraped_pages`, pass them into this function passing your GPU `model` object:
-python
-upgraded_semantic = semantic_chunk_documents(scraped_pages, model)
-'''

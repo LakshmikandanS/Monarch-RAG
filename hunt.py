@@ -1,40 +1,42 @@
-import os
+"""Diagnostic: locate CUDA DLLs and test the shared embedding model."""
+
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
-print("1. Physically scanning your .venv for cublasLt64_12.dll...")
-venv_root = Path(sys.prefix)
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-cublas_files = list(venv_root.rglob("cublasLt64_12.dll"))
+from monarch.embeddings import load_model, providers  # noqa: E402
+from monarch.embeddings.cuda import enable_cuda_runtime  # noqa: E402
 
-if not cublas_files:
-    print("\n❌ FOUND THE ISSUE: The DLL is physically missing from your disk.")
-    print("Run this exact command in your terminal right now:")
-    print("  .\\.venv\\Scripts\\python.exe -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12")
-    sys.exit()
 
-cublas_dir = str(cublas_files[0].parent.resolve())
-print(f"   ✔ Found it sitting inside: {cublas_dir}")
-os.add_dll_directory(cublas_dir)
+def main() -> None:
+    print("1. Scanning Python environment for CUDA runtime DLLs...")
+    discovered_cuda = enable_cuda_runtime(verbose=True)
 
-# Grab cuDNN while we are here
-cudnn_files = list(venv_root.rglob("cudnn*.dll"))
-if cudnn_files:
-    cudnn_dir = str(cudnn_files[0].parent.resolve())
-    print(f"   ✔ Found cuDNN sitting inside: {cudnn_dir}")
-    os.add_dll_directory(cudnn_dir)
+    if not discovered_cuda:
+        print("\nNo pip-installed NVIDIA runtime directories were found.")
+        print(
+            "Install CUDA runtime wheels such as "
+            "nvidia-cublas-cu12 and nvidia-cudnn-cu12 if GPU binding is required."
+        )
 
-print("\n2. Attempting FastEmbed GPU Binding...")
-from fastembed import TextEmbedding
+    print("\n2. Attempting shared FastEmbed binding...")
+    load_model()
+    locked_engines = providers()
 
-model = TextEmbedding("BAAI/bge-base-en-v1.5", providers=["CUDAExecutionProvider"])
-locked_engines = model.model._model.session.get_providers()
+    print("\n" + "=" * 60)
+    print(f"FINAL BOUND ENGINES: {locked_engines}")
+    print("=" * 60)
 
-print("\n" + "="*60)
-print(f"FINAL BOUND ENGINES: {locked_engines}")
-print("="*60)
+    if "CUDAExecutionProvider" in locked_engines:
+        print("SUCCESS: CUDAExecutionProvider is active.")
+    else:
+        print("WARNING: model is not bound to CUDA.")
 
-if "CUDAExecutionProvider" in locked_engines:
-    print("🚀 SUCCESS. The RTX 5060 is holding the model.")
-else:
-    print("💀 STILL CPU. Windows rejected the injected path.")
+
+if __name__ == "__main__":
+    main()
